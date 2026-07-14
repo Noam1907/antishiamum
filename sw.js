@@ -1,4 +1,4 @@
-const CACHE = 'anti-boredom-v4';
+const CACHE = 'anti-boredom-v5';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -9,13 +9,31 @@ self.addEventListener('activate', e => {
   ).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', e => {
-  e.respondWith(
-    caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
-      if (e.request.method === 'GET' && res.ok && new URL(e.request.url).origin === location.origin) {
-        const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(e.request, copy));
-      }
-      return res;
-    }))
-  );
+  if (e.request.method !== 'GET') return;
+  const url = new URL(e.request.url);
+  const isHTML = e.request.mode === 'navigate'
+    || url.pathname === '/' || url.pathname.endsWith('/') || url.pathname.endsWith('index.html');
+  if (isHTML) {
+    // Network-first: always try fresh HTML so updates propagate; fall back to cache offline.
+    e.respondWith(
+      fetch(e.request).then(res => {
+        if (res.ok && url.origin === location.origin) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put('./index.html', copy));
+        }
+        return res;
+      }).catch(() => caches.match(e.request).then(hit => hit || caches.match('./index.html')))
+    );
+  } else {
+    // Cache-first for static assets (icons, manifest): fast, they change rarely.
+    e.respondWith(
+      caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
+        if (res.ok && url.origin === location.origin) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, copy));
+        }
+        return res;
+      }))
+    );
+  }
 });
